@@ -1,0 +1,311 @@
+---
+title: "Entrega_Colgate"
+author: "Matias Corredoira"
+date: "19/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Supuesto
+Nuestro deseo es conocer la efectividad de los gastos en publicidad. Para conocer el impacto de las iniciativas tomadas se realizará el análisis de intervención. Para nuestro caso se tendrá en cuenta la lucha por mayores cuotas de mercados desde la perspectiva de dos empresas: Colgate y Crest.
+
+### Cargamos las librerías necesarias.
+
+```{r,warning=FALSE,message=FALSE,echo=FALSE}
+library(openxlsx)
+library(skimr)
+library(fpp2)
+library(ggplot2)
+library(zoo)
+library(ggfortify)
+library(tseries)
+require(forecast)
+require(xts)
+library(readr)
+library(tidyverse)
+library(dplyr)
+library(TSA)
+library(Hmisc)
+library(astsa)
+library(tsoutliers)
+library(normtest)
+```
+
+
+
+### Indicamos  la base de datos
+
+
+```{r cars}
+library(readxl)
+data <- read_excel('data.xlsx')
+View(data)
+```
+
+
+### IndICamos datos semanales y a continuación realizamos un pequeño sumatorio general de datos
+
+```{r}
+data$Date <- as.Date(paste(data$Year, data$Week, 1, sep = "-"), "%Y-%U-%u")
+data <- dplyr::select(data, -Year, -Week)
+```
+
+
+
+```{r, echo=FALSE}
+skim(data)
+```
+
+
+### Separamos los datos tanto de Colgate como de Crest.
+
+```{r , echo=TRUE}
+colgate <- ts(data$Colgate, start=1958,frequency = 52)
+crest <- ts(data$Crest, start = 1958, frequency =52)
+```
+
+
+
+### Convertimos los datos a formato zoo dado que queremos trabajar con series temporales. A continuación representamos las series.
+
+```{r , echo=TRUE}
+acolgate <- as.zoo(colgate)
+acrest <- as.zoo(crest)
+```
+
+
+
+
+```{r , echo=FALSE}
+autoplot(acolgate)+ggtitle("Cuota ")+ xlab("Week") + ylab("Colgate")
+autoplot(acrest) + ggtitle("Cuota") + xlab("Week") + ylab("Crest")
+```
+
+
+
+
+### A continuación mediante el test Dickey Fuller comprobaremos la posible existencia de estacionalidad dentro en las series.
+
+
+```{r, warning=FALSE}
+adf.test(acolgate)
+adf.test(acrest)
+```
+
+
+Ninguno de los 2 valores supera el margen de significación marcado, por lo que se concluye la  existencia de estacionaridad. 
+
+
+
+
+
+
+
+### Eliminamos las semanas correspondientes al año 1963 las cuales formarán parte de nuestro test
+
+```{r , echo=TRUE}
+cOmit=16                             #Formarán parte del test
+
+nObsColgate=length(acolgate)
+nObsCrest= length(acrest)
+```
+
+Correspondientes a los meses pautados para la entrega.
+
+
+### Seleccionamos el train de cada una de las 2 empresas.
+
+```{r , echo=TRUE}
+colgatet <- window(acolgate, start=index(acolgate[1]),end = index(acolgate[nObsColgate- cOmit]))
+crestt <- window(acrest, star= index(acrest[1]), end = index(acrest[nObsCrest-cOmit]))
+
+```
+
+
+
+## Modelo ARIMA 
+
+#### Para obtener el modelo autilizaremos autoarima. Lo realizaremos con ela parte del train que hemos elaborado anteriormente.
+
+
+```{r , echo=FALSE}
+fit_colgate <- auto.arima(colgatet) 
+summary(fit_colgate)
+
+                                                                     #Automatización de los coeficientes
+fit_crest <- auto.arima(crestt)
+summary(fit_crest)
+
+```
+
+En ambas series obtenemos como resultado (0,1,1) por ello, concluimmos que no se da la existencia de autroregresivos, se da una media movil y existe una diferenciación regular.
+
+#### Comprobamos los residuos los residuos
+
+```{r , echo=FALSE}
+ggtsdisplay(fit_colgate$residuals,
+            main = "Residuos de ARIMA en Colgate") 
+ggtsdisplay(fit_crest$residuals,
+            main = "Residuos de ARIMA en Crest") 
+```
+
+
+
+
+
+### Realizaremos el test de Box Ljung para la comprobación de la existencia de correlaciones dentro de las series temporales
+
+
+```{r}
+#box-Ljung Test
+Box.test(fit_colgate$residuals,lag=3, fitdf=1, type="Lj")
+
+Box.test(fit_crest$residuals,lag=3, fitdf=1, type="Lj")
+```
+
+Vemos como ambos valores nos dan por encima del nivel de significación, por lo que concluimos que la hipotesis nula no se rechaza, y por ello no rechazamos la independencia de las observaciones.
+
+
+
+
+
+## Predicción
+
+##### Aplicamos forecast para realizar el pronóstico, para ello aplicaremos el siguiente código
+
+```{r , include = FALSE}
+cuota.arima.colgate=forecast(fit_colgate, h=16)
+
+cuota.arima.crest=forecast(fit_crest, h=16)
+```
+
+
+```{r, echo=FALSE, include = FALSE}
+summary(cuota.arima.colgate)
+summary(cuota.arima.crest)
+```
+
+
+### Realizamos sus gráficos correspondientes, el primero con Colgate y el siguiente con Crest.
+
+```{r , echo=FALSE}
+
+plot(cuota.arima.colgate)
+plot(cuota.arima.crest)
+
+```
+
+
+
+
+
+### Realizamos la localización de los distintos outliers en los modelos ARIMA realizados anteriormente.
+
+```{r , echo=FALSE}
+detectAO(fit_colgate) 
+detectAO(fit_crest) 
+
+detectIO(fit_colgate) 
+detectIO(fit_crest)
+```
+
+Comprobamos la existencia de tres outliers aditivos, en 135, dado por el comunicado, y en 136 y 138 que salen muy próximos al anterior suceso comentado.
+
+
+
+## ARIMAX
+
+#### Reaalizamos este modelo con el orden que nos ha proporcionado el anterior ARIMA con ambas empresas.
+
+```{r , echo=FALSE}
+arimax_colgate <- arimax(as.double(acolgate), 
+                         order = c(0,1,1),
+                         xtransf = data.frame(A60_step = 1*(seq(acolgate) ),
+                                              A60_pulse = 1*(seq(acolgate))),
+                         transfer = list(c(0,0), c(1,0)),
+                         method = "ML")
+arimax_colgate
+```
+
+
+
+```{r , echo=FALSE}
+arimax_crest <- arimax(as.double(acrest), 
+                       order = c(0,1,1),
+                       xtransf = data.frame(A60_step = 1*(seq(acrest) >= 135 ),
+                                            A60_pulse = 1*(seq(acrest) )),
+                       xreg = data.frame(A60_3=1*(seq(acrest) == 136),
+                                         A60_3=1*(seq(acrest) == 138)),
+                       transfer = list(
+                         c(0,0),
+                         c(0,0)
+                       ),
+                       method = 'ML')
+arimax_crest
+```
+
+
+
+#### De nuevo comprobamos la existencia de outliers, con la realización del ARIMAX vemos que ya no nos da ninguno.
+
+```{r , echo=FALSE}
+detectAO(arimax_colgate) 
+detectIO(arimax_colgate) 
+
+detectAO(arimax_crest)
+detectIO(arimax_crest)
+```
+
+
+
+
+
+#### Finalmente realizamos la función de transferencia.
+
+
+```{r , echo=FALSE}
+transferenciacolgate <- arimax(as.double(acolgate),
+                        order = c(0,1,1), 
+                        include.mean = TRUE,
+                        xtransf = acrest, 
+                        transfer = list(c(0,0)), 
+                        method = "ML")
+
+
+summary(transferenciacolgate)
+
+```
+```{r}
+transferenciacrest <- arimax(as.double(acrest),
+                        order = c(0,1,1), 
+                        include.mean = TRUE,
+                        xtransf = acolgate, 
+                        transfer = list(c(0,0)), 
+                        method = "ML")
+
+
+summary(transferenciacrest)
+```
+```{r}
+ggtsdisplay(transferenciacolgate$residuals,
+            main = "Residuos de transferencia en Colgate") 
+ggtsdisplay(transferenciacrest$residuals,
+            main = "Residuos de transferencia en Crest") 
+```
+
+Como podemos comprobar con la función de transferencia todos los residuos son ruido blanco.
+
+
+
+
+
+
+
+
+
+
+
+
